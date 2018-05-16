@@ -1045,15 +1045,13 @@ public class API {
 
         setupResponseHeaders(exchange);
 
-        ByteBuffer responseBuf;
         if (res instanceof BinaryResponse) {
-            final BinaryResponse response = (BinaryResponse) res;
-            responseBuf = ByteBuffer.wrap(response.getBytes());
-            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/octet-stream");
-        } else {
-            final String response = gson.toJson(res);
-            responseBuf = ByteBuffer.wrap(response.getBytes(StandardCharsets.UTF_8));
+            sendBinaryResponse(exchange, (BinaryResponse) res, beginningTime);
+            return;
         }
+
+        final String response = gson.toJson(res);
+        ByteBuffer responseBuf = ByteBuffer.wrap(response.getBytes(StandardCharsets.UTF_8));
 
         exchange.setResponseContentLength(responseBuf.array().length);
         StreamSinkChannel sinkChannel = exchange.getResponseChannel();
@@ -1074,6 +1072,45 @@ public class API {
                 exchange.endExchange();
             }
         });
+        sinkChannel.resumeWrites();
+    }
+
+    private void sendBinaryResponse(final HttpServerExchange exchange, final BinaryResponse res, final long beginningTime) {
+        final int size = res.getSize();
+
+        exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/octet-stream");
+        exchange.setResponseContentLength(size);
+        StreamSinkChannel sinkChannel = exchange.getResponseChannel();
+        sinkChannel.getWriteSetter().set( channel -> {
+            ByteBuffer buffer = res.getCurrentBuffer();
+
+            if(buffer == null) {
+                exchange.endExchange();
+                return;
+            }
+
+            if (buffer.hasRemaining()) {
+                try {
+                    int c;
+                    do {
+                        c = channel.write(buffer);
+                    } while (buffer.hasRemaining() && c > 0);
+
+                    if (buffer.remaining() == 0) {
+                        res.incrementOffset();
+                    }
+                    channel.resumeWrites();
+                } catch (IOException e) {
+                    log.error("Lost connection to client - cannot send response");
+                    exchange.endExchange();
+                    sinkChannel.getWriteSetter().set(null);
+                }
+            } else {
+                res.incrementOffset();
+                channel.resumeWrites();
+            }
+        });
+
         sinkChannel.resumeWrites();
     }
 
