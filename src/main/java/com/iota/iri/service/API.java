@@ -477,7 +477,7 @@ public class API {
 
         return CheckConsistency.create(state,info);
     }
-    
+
     private double getParameterAsDouble(Map<String, Object> request, String paramName) throws ValidationException {
         validateParamExists(request, paramName);
         final double result;
@@ -1034,7 +1034,6 @@ public class API {
     private void sendResponse(final HttpServerExchange exchange, final AbstractResponse res, final long beginningTime)
             throws IOException {
         res.setDuration((int) (System.currentTimeMillis() - beginningTime));
-        final String response = gson.toJson(res);
 
         if (res instanceof ErrorResponse) {
             exchange.setStatusCode(400); // bad request
@@ -1046,7 +1045,16 @@ public class API {
 
         setupResponseHeaders(exchange);
 
-        ByteBuffer responseBuf = ByteBuffer.wrap(response.getBytes(StandardCharsets.UTF_8));
+        ByteBuffer responseBuf;
+        if (res instanceof BinaryResponse) {
+            final BinaryResponse response = (BinaryResponse) res;
+            responseBuf = ByteBuffer.wrap(response.getBytes());
+            exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/octet-stream");
+        } else {
+            final String response = gson.toJson(res);
+            responseBuf = ByteBuffer.wrap(response.getBytes(StandardCharsets.UTF_8));
+        }
+
         exchange.setResponseContentLength(responseBuf.array().length);
         StreamSinkChannel sinkChannel = exchange.getResponseChannel();
         sinkChannel.getWriteSetter().set( channel -> {
